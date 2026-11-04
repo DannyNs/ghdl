@@ -1,29 +1,26 @@
-# GHDL execution graph
+# Execution graph — {{ITEM_ID}}
 
-- Task:
-- Graph revision: 1
-- Last updated:
+- Item: {{ITEM_ID}}
+- Revision: 1
+- Updated: {{DATE}}
+- Purpose: describe the dependency order for this delivery slice.
+
+## DAG
 
 ```mermaid
 flowchart TD
-  A["DISCOVER — inspect repo and instructions"] --> B["PLAN — define graph and acceptance"]
-  B --> C["IMPLEMENT — make scoped change"]
-  C --> D["VERIFY — run checks"]
-  D --> E{"Acceptance criteria met?"}
-  E -->|Yes| F["REVIEW — inspect diff"]
-  F --> G["REPORT — summarize evidence"]
-  E -->|No, retries remain| H["REPAIR — diagnose and fix"]
-  H --> D
-  E -->|Retry limit reached| I["BLOCKED — report evidence"]
+    DISCOVER["DISCOVER — inspect repository and existing state"] --> IMPLEMENT["IMPLEMENT — deliver scoped outcome"]
+    IMPLEMENT --> VERIFY["VERIFY — prove acceptance criteria"]
+    VERIFY --> REVIEW["REVIEW — inspect final diff and evidence"]
 ```
 
 ## Node contracts
 
-| ID | Goal | Depends on | Inputs | Outputs | Done when | Owner |
+| Node ID | Type | Depends on | Goal | Inputs | Outputs | Completion predicate |
 |---|---|---|---|---|---|---|
-| DISCOVER | Understand relevant repository context | — | Instructions, source, Git status | Repository findings | Relevant constraints and checks recorded | Orchestrator |
-| PLAN | Define task and graph | DISCOVER | Findings, user request | Task contract, graph | Scope and acceptance criteria are checkable | Orchestrator |
-| IMPLEMENT | Make the scoped change | PLAN | Task contract | Source changes | Planned changes are present | Worker |
-| VERIFY | Test the change | IMPLEMENT | Diff, test/build commands | Verification evidence | Declared checks have results | Worker |
-| REVIEW | Review final diff | VERIFY | Diff, acceptance criteria, test results | Review findings | No unresolved critical issue | Orchestrator |
-| REPORT | Communicate outcome | REVIEW | All artifacts and evidence | Final report | Status accurately reflects evidence | Orchestrator |
+| DISCOVER | inspect | — | Understand relevant code, constraints, current changes, and checks | User request, project instructions, source, Git state | Findings recorded in run state | Relevant context and existing changes are recorded; verification commands are identified |
+| IMPLEMENT | implement | DISCOVER | Deliver the work item within its agreed scope | Work item, findings | Scoped implementation and tests | Planned change is present; no unrelated changes were introduced |
+| VERIFY | verify | IMPLEMENT | Prove every acceptance criterion | Implementation, acceptance criteria, verification commands | Test/check results and acceptance evidence | Every required criterion has evidence; failed or unavailable checks are explicitly recorded |
+| REVIEW | review | VERIFY | Review the complete change and evidence | Diff, work item, run state | Review findings and final decision | No unresolved critical issue; claims match evidence |
+
+<!-- Add, remove, or split nodes to match the task. Keep this table and the run-state node table synchronized. -->

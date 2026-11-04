@@ -1,87 +1,69 @@
 # GHDL — Graph Harness Development Lifecycle
 
-A tool-agnostic protocol for planning and executing software changes as a **verifiable dependency graph (DAG)**.
+GHDL 2.3.0 is a lightweight, tool-agnostic workflow for planning and delivering software changes as verifiable tasks with explicit dependencies and execution evidence.
 
-GHDL separates *the development method* from *the agent runtime*. It works with IDE assistants, terminal agents, API-based agents, or plain manual development — no specific model, editor, CLI, or orchestration framework is required. If the runtime cannot support a feature (parallel workers, persistent checkpoints, tool permissions), state the limitation and use the closest safe manual equivalent.
+## Adopt GHDL in a project
 
-## When to use
+1. Copy **only** `AGENTS.md` and the complete `.ghdl/` directory into the target repository root.
+2. Treat both as generic, read-only framework distribution files. Do not add project-specific state to them or edit them during normal use.
+3. Run `python .ghdl/scripts/ghdl.py init`.
+4. GHDL creates all writable project state under `ghdl/`; no other release files are required. `AGENTS.md` remains the single authoritative process instruction.
 
-Use GHDL for feature work, bug fixes, refactoring, architecture changes — anything where scope, dependencies, or verification matter. For truly trivial edits, apply the same rules in lightweight form without creating runtime artifacts.
+The helpers use only the Python standard library. They do not call a model or access the network. The distribution files `AGENTS.md` and `.ghdl/` are portable framework assets and are read-only during project operation; helper commands write only under `ghdl/`.
 
-## Adopting in another project
-
-1. Copy `AGENTS.md` and the `.ghdl/` directory into your repository root.
-2. Add project-specific conventions to `AGENTS.md` (keep it short) or a separate reference file under `.ghdl/references/`.
-3. For each task, follow `AGENTS.md` → `.ghdl/README.md` → `.ghdl/references/lifecycle.md`, and use the templates in `.ghdl/templates/` when the task warrants artifacts.
-
-## Directory layout
+## Project data layout
 
 ```text
-AGENTS.md            # short repo-level entry point (rules + final report format)
-.ghdl/
-├── README.md        # protocol overview, lifecycle summary, runtime boundary
-├── references/
-│   ├── lifecycle.md     # detailed stage rules (intake → report)
-│   └── graph-contract.md  # node fields, invariants, sizing guidance
-└── templates/
-    ├── task-contract.md   # goal, scope, acceptance criteria, risk/approvals
-    ├── graph.md           # Mermaid DAG + node contract table
-    └── run-state.md       # per-node status, attempts, evidence, final status
+ghdl/
+├── PRODUCT.md
+├── BOARD.md
+├── items/
+│   └── GHDL-YYYYMMDD-XXXXXXXX/
+│       ├── task.md
+│       ├── graph.md
+│       └── run-state.md
+└── archive/
+    ├── INDEX.md
+    └── GHDL-YYYYMMDD-XXXXXXXX/
+        ├── task.md
+        ├── graph.md
+        └── run-state.md
 ```
 
-## Minimal lifecycle
+An item is a self-contained directory. `task.md` is its source of truth; `graph.md` and `run-state.md` are created when the item is activated. Archiving moves the whole directory unchanged.
 
-`INTAKE → DISCOVER → PLAN → IMPLEMENT → VERIFY → REVIEW → REPORT`
+## Helper commands
 
-| Stage | What happens |
-|---|---|
-| **Intake** | One-sentence goal; in/out of scope, checkable acceptance criteria, constraints, risk level (low/medium/high), human-approval operations. Record reversible assumptions instead of asking when safe to do so. |
-| **Discover** | Inspect instructions, code/tests/build files, `git status --short`, and existing diffs. Never infer repository facts without inspection; never overwrite user changes. |
-| **Plan** | Task contract + small DAG. Node types: `inspect`, `design`, `implement`, `verify`, `review`, `human_gate`. Do not over-fragment trivial work. |
-| **Implement** | Execute only nodes whose dependencies are complete. If new facts invalidate the graph: stop downstream work, explain why, revise the plan (bump revision), get approval if scope/risk changed, resume from the earliest invalidated node. |
-| **Verify** | Deterministic evidence in order: focused tests → broader tests → build/type-check/lint → diff review against acceptance criteria. Record each check as `PASS` / `FAIL` / `BLOCKED` / `N/A`. Retry policy: one initial attempt + at most two repair attempts, then stop and report. Never silently weaken a test or predicate. |
-| **Review** | Scope creep, secrets, error handling/compatibility, migrations/rollback, whether tests actually prove the acceptance criteria, whether every claim has evidence. Human review required before consequential actions (production deploys, destructive ops, permission changes). |
-| **Report** | Truthful status: `DONE` / `PARTIAL` / `BLOCKED`, with exact commands and results, unresolved items, risks, and artifact paths. Never claim an unrun command passed. |
+```bash
+python .ghdl/scripts/ghdl.py init
+python .ghdl/scripts/ghdl.py new --title "Add user sign-in" --type feature --priority P1
+python .ghdl/scripts/ghdl.py transition <ITEM-ID> READY
+python .ghdl/scripts/ghdl.py transition <ITEM-ID> IN_PROGRESS
+python .ghdl/scripts/ghdl.py transition <ITEM-ID> VERIFY
+python .ghdl/scripts/ghdl.py transition <ITEM-ID> DONE
+python .ghdl/scripts/ghdl.py archive
+python .ghdl/scripts/ghdl.py restore <ITEM-ID>
+python .ghdl/scripts/ghdl.py board
+python .ghdl/scripts/ghdl.py validate
+python .ghdl/scripts/ghdl.py next
+```
 
-## Non-negotiable rules
+`archive` requires no ID. It checks every active task and moves all tasks whose incoming and outgoing `depends_on` relationships connect only to `DONE` or `CANCELLED` tasks. A task with no dependency relationships is eligible. The candidate's own status is not a separate condition.
 
-- Inspect the repository and existing user changes before editing.
-- Define a task contract and checkable acceptance criteria before implementation.
-- Represent work as a DAG with explicit dependencies.
-- A node is complete only when its completion predicate has evidence.
-- Use deterministic checks (tests, builds, linters, scripts) wherever possible.
-- Bound retries: one initial attempt plus at most two repair attempts per failed node.
-- Ask for human approval before destructive actions, production changes, external side effects, or materially expanded scope.
-- Do not overwrite unrelated changes, weaken tests silently, or claim checks passed if they were not run.
-- If new evidence invalidates the plan, revise the graph and record why.
-- Report `DONE`, `PARTIAL`, or `BLOCKED` truthfully.
+The helper updates `ghdl/archive/INDEX.md` automatically. Its simple format is one line per archived task:
 
-## Graph contract (node semantics)
+```text
+GHDL-YYYYMMDD-XXXXXXXX Task title
+```
 
-Every node defines: stable `id`, observable `goal`, `depends_on`, `inputs`, `outputs`, `done_when`, `status` (`PENDING` / `READY` / `RUNNING` / `PASS` / `FAIL` / `BLOCKED` / `SKIPPED`), `attempts`, and `owner`.
+The archive index is the only archive file permitted for routine LLM context discovery. Archived task directories must not be scanned unless historical details are necessary.
 
-Key invariants:
+## Verification when maintaining GHDL
 
-- Dependencies form a DAG; repair is bounded retry, not an unbounded cycle.
-- A node is `READY` only when its dependencies are `PASS` (or a documented alternative supplies the required input).
-- `SKIPPED` ≠ `PASS`; `PASS` requires evidence such as a command result, artifact, test output, or explicit human decision.
-- A failed node does not satisfy downstream dependencies.
-- Human approval is an explicit gate, never inferred.
-- Re-plan and increment the graph revision when scope or facts change.
-- Do not claim parallelism unless the runtime actually executes work concurrently.
+```bash
+python -c "from pathlib import Path; compile(Path('.ghdl/scripts/ghdl.py').read_text(encoding='utf-8'), 'ghdl.py', 'exec')"
+python -m unittest discover -s tests -v
+python .ghdl/scripts/ghdl.py validate
+```
 
-Keep graphs small: one node per meaningful independent output, dependency, risk boundary, or verification predicate — not one node per shell command.
-
-## Per-task artifacts
-
-For tasks complex enough to benefit, create in the working tree:
-
-- `ghdl/task-contract.md` — goal, scope, acceptance criteria, constraints/assumptions, risk and approvals
-- `ghdl/graph.md` — Mermaid DAG + node contract table
-- `ghdl/run-state.md` — per-node status/attempts/evidence, decisions, final status
-
-These are transient run artifacts, not permanent repository files. Avoid committing them unless the project wants them versioned.
-
-## Runtime boundary
-
-This protocol describes a process; it does not execute graphs, spawn agents, persist state automatically, or guarantee parallelism. A compatible runtime may automate those functions later; otherwise, follow the protocol and update the artifacts manually.
+See `AGENTS.md` for the complete lifecycle, constraints, and archive access restrictions.
