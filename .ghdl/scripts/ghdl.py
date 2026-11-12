@@ -10,9 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
-import uuid
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -24,7 +22,6 @@ GH_D = ROOT / "ghdl"
 ITEMS_D = GH_D / "items"
 ARCHIVE_D = GH_D / "archive"
 ARCHIVE_INDEX = ARCHIVE_D / "INDEX.md"
-LEGACY_RUNS_D = GH_D / "runs"
 TEMPLATES_D = ROOT / ".ghdl" / "templates"
 BOARD_FILE = GH_D / "BOARD.md"
 
@@ -37,8 +34,8 @@ NODE_TYPES = ("inspect", "design", "implement", "verify", "review", "human_gate"
 ACTIVE_STATUSES = ("IN_PROGRESS", "VERIFY")
 WIP_LIMIT = 1
 META_RE = re.compile(r"<!-- GHDL_ITEM_BEGIN\s*(.*?)\s*GHDL_ITEM_END -->", re.DOTALL)
-ID_RE = re.compile(r"^GHDL-(?:\d{4,}|\d{8}-[0-9A-F]{8})$")
-INDEX_LINE_RE = re.compile(r"^(GHDL-(?:\d{4,}|\d{8}-[0-9A-F]{8}))\s+(.+?)\s*$")
+ID_RE = re.compile(r"^GHDL-(?:\d{4,}|\d{8}-[0-9A-F]{8}|\d{8}-\d{2}_\d{2}_\d{2}(?:-\d+)?)$")
+INDEX_LINE_RE = re.compile(r"^(GHDL-(?:\d{4,}|\d{8}-[0-9A-F]{8}|\d{8}-\d{2}_\d{2}_\d{2}(?:-\d+)?))\s+(.+?)\s*$")
 ALLOWED_TRANSITIONS = {
     "BACKLOG": {"READY", "BLOCKED", "CANCELLED"},
     "READY": {"BACKLOG", "IN_PROGRESS", "BLOCKED", "CANCELLED"},
@@ -155,11 +152,6 @@ def dependency_status(item_id: str, items: Dict[str, Tuple[Dict[str, Any], Path,
 
 def load_items() -> Dict[str, Tuple[Dict[str, Any], Path, str]]:
     ITEMS_D.mkdir(parents=True, exist_ok=True)
-    legacy_files = sorted(ITEMS_D.glob("*.md"))
-    if legacy_files:
-        raise GHDLError(
-            "Legacy flat work-item files were found. Run 'python .ghdl/scripts/ghdl.py migrate' first."
-        )
     found: Dict[str, Tuple[Dict[str, Any], Path, str]] = {}
     for item_dir in sorted(path for path in ITEMS_D.iterdir() if path.is_dir()):
         path = item_dir / "task.md"
@@ -500,7 +492,7 @@ def validate_items(items: Dict[str, Tuple[Dict[str, Any], Path, str]], check_boa
         if path.parent.name != item_id:
             errors.append("{}: directory must match metadata ID {}".format(relative(path), item_id))
         if not ID_RE.fullmatch(item_id):
-            errors.append("{}: ID must use GHDL-YYYYMMDD-XXXXXXXX format (legacy numeric IDs are also accepted)".format(item_id))
+            errors.append("{}: ID must use GHDL-YYYYMMDD-HH_mm_ss, GHDL-YYYYMMDD-XXXXXXXX, or legacy numeric format".format(item_id))
         for field in ("title", "type", "priority", "status", "created", "updated", "depends_on"):
             if field not in meta:
                 errors.append("{}: missing metadata field '{}'".format(item_id, field))
@@ -608,85 +600,10 @@ def update_archive_index(additions: Optional[Dict[str, str]] = None, removals: O
     return original
 
 
-def migrate_legacy_layout() -> int:
-    """Move legacy items/*.md and runs/<ID> into items/<ID>/ without overwriting."""
-    ITEMS_D.mkdir(parents=True, exist_ok=True)
-    legacy_item_files = sorted(ITEMS_D.glob("*.md"))
-    legacy_run_dirs = [path for path in LEGACY_RUNS_D.iterdir() if path.is_dir()] if LEGACY_RUNS_D.is_dir() else []
-    operations: List[Tuple[Path, Path]] = []
-    item_ids_seen = set()
-
-    for legacy_file in legacy_item_files:
-        metadata, _content = read_metadata(legacy_file)
-        item_id = metadata.get("id")
-        if not isinstance(item_id, str) or not item_id:
-            raise GHDLError("{} has no valid item ID; migration stopped without moving files".format(relative(legacy_file)))
-        if legacy_file.stem != item_id:
-            raise GHDLError("Legacy filename {} does not match metadata ID {}".format(legacy_file.name, item_id))
-        if item_id in item_ids_seen:
-            raise GHDLError("Duplicate legacy work-item ID: {}".format(item_id))
-        item_ids_seen.add(item_id)
-        target_dir = ITEMS_D / item_id
-        if target_dir.exists():
-            raise GHDLError("Migration conflict: {} already exists".format(relative(target_dir)))
-        operations.append((legacy_file, target_dir / "task.md"))
-        run_dir = LEGACY_RUNS_D / item_id
-        if run_dir.is_dir():
-            for source in sorted(run_dir.rglob("*")):
-                if source.is_file():
-                    rel = source.relative_to(run_dir)
-                    operations.append((source, target_dir / rel))
-
-    for run_dir in legacy_run_dirs:
-        if run_dir.name not in item_ids_seen and not (ITEMS_D / run_dir.name / "task.md").is_file():
-            raise GHDLError("Orphan legacy run directory {}; no matching work item exists".format(relative(run_dir)))
-        if run_dir.name not in item_ids_seen:
-            target_dir = ITEMS_D / run_dir.name
-            for source in sorted(run_dir.rglob("*")):
-                if source.is_file():
-                    rel = source.relative_to(run_dir)
-                    operations.append((source, target_dir / rel))
-
-    planned_destinations = set()
-    for source, destination in operations:
-        if destination in planned_destinations or destination.exists():
-            raise GHDLError("Migration conflict: destination {} already exists".format(relative(destination)))
-        planned_destinations.add(destination)
-
-    moved: List[Tuple[Path, Path]] = []
-    try:
-        for source, destination in operations:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source), str(destination))
-            moved.append((source, destination))
-    except Exception:
-        for source, destination in reversed(moved):
-            source.parent.mkdir(parents=True, exist_ok=True)
-            if destination.exists():
-                shutil.move(str(destination), str(source))
-        raise
-
-    if LEGACY_RUNS_D.is_dir():
-        for directory in sorted((p for p in LEGACY_RUNS_D.rglob("*") if p.is_dir()), reverse=True):
-            try:
-                directory.rmdir()
-            except OSError:
-                pass
-        try:
-            LEGACY_RUNS_D.rmdir()
-        except OSError:
-            pass
-    old_board = GH_D / "board.md"
-    if old_board.is_file() and not BOARD_FILE.exists():
-        old_board.rename(BOARD_FILE)
-    return len(legacy_item_files)
-
-
 def command_init(_args: argparse.Namespace) -> None:
     GH_D.mkdir(parents=True, exist_ok=True)
     ITEMS_D.mkdir(parents=True, exist_ok=True)
     ARCHIVE_D.mkdir(parents=True, exist_ok=True)
-    migrated = migrate_legacy_layout()
     created = copy_template("product.md", GH_D / "PRODUCT.md")
     if not ARCHIVE_INDEX.exists():
         atomic_write_text(ARCHIVE_INDEX, "")
@@ -695,23 +612,6 @@ def command_init(_args: argparse.Namespace) -> None:
     print("GHDL project structure ready at ghdl/.")
     print("Product context: {}".format("created from template" if created else "preserved"))
     print("Work items found: {}".format(len(items)))
-    if migrated:
-        print("Migrated legacy flat work items: {}".format(migrated))
-
-
-def command_migrate(_args: argparse.Namespace) -> None:
-    GH_D.mkdir(parents=True, exist_ok=True)
-    ITEMS_D.mkdir(parents=True, exist_ok=True)
-    ARCHIVE_D.mkdir(parents=True, exist_ok=True)
-    migrated = migrate_legacy_layout()
-    if not ARCHIVE_INDEX.exists():
-        atomic_write_text(ARCHIVE_INDEX, "")
-    if not (GH_D / "PRODUCT.md").exists():
-        copy_template("product.md", GH_D / "PRODUCT.md")
-    items = load_items()
-    refresh_board(items)
-    print("Migration complete. Converted {} legacy item(s).".format(migrated))
-    print("Active work items: {}".format(len(items)))
 
 
 def command_new(args: argparse.Namespace) -> None:
@@ -725,16 +625,26 @@ def command_new(args: argparse.Namespace) -> None:
     for ref in ([parent] if parent else []) + deps:
         if ref not in items:
             raise GHDLError("Unknown active parent/dependency item: {}".format(ref))
-    def allocate_id() -> str:
-        # Avoid blocking on OS entropy: the timestamp + process ID + repository path
-        # provide a collision-resistant seed across concurrent helper processes.
-        seed = "{}:{}:{}".format(ROOT.resolve(), os.getpid(), time.time_ns())
-        suffix = uuid.uuid5(uuid.NAMESPACE_URL, seed).hex[:8].upper()
-        return "GHDL-{}-{}".format(today().replace("-", ""), suffix)
+    def is_taken(candidate: str) -> bool:
+        return candidate in items or (ITEMS_D / candidate).is_dir() or (ARCHIVE_D / candidate).is_dir()
 
-    item_id = allocate_id()
-    while item_id in items or (ITEMS_D / item_id).exists() or (ARCHIVE_D / item_id).exists():
-        item_id = allocate_id()
+    base = "GHDL-{}-{}".format(today().replace("-", ""), datetime.now().strftime("%H_%M_%S"))
+    if args.id_suffix is None:
+        item_id = base
+        while is_taken(item_id):
+            # Same-second collision (including concurrent helper processes): append the smallest free -x suffix.
+            counter = 1
+            candidate = "{}-{}".format(base, counter)
+            while is_taken(candidate):
+                counter += 1
+                candidate = "{}-{}".format(base, counter)
+            item_id = candidate
+    else:
+        if not (isinstance(args.id_suffix, int) and 1 <= args.id_suffix <= 99):
+            raise GHDLError("--id-suffix must be an integer from 1 to 99")
+        item_id = "{}-{}".format(base, args.id_suffix)
+        if is_taken(item_id):
+            raise GHDLError("ID {} already exists; choose a different --id-suffix".format(item_id))
     destination_dir = ITEMS_D / item_id
     destination = destination_dir / "task.md"
     metadata = {
@@ -1018,11 +928,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="GHDL Continuous Flow project-state helper")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    init_parser = sub.add_parser("init", help="initialize project files and migrate the legacy layout if found")
+    init_parser = sub.add_parser("init", help="initialize project files from the templates")
     init_parser.set_defaults(func=command_init)
-
-    migrate_parser = sub.add_parser("migrate", help="move legacy items/*.md and runs/<ID>/ into items/<ID>/")
-    migrate_parser.set_defaults(func=command_migrate)
 
     new_parser = sub.add_parser("new", help="create a BACKLOG work item from the template")
     new_parser.add_argument("--title", required=True)
@@ -1030,6 +937,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_parser.add_argument("--priority", choices=PRIORITIES, default="P2")
     new_parser.add_argument("--parent")
     new_parser.add_argument("--depends-on", help="comma-separated prerequisite item IDs")
+    new_parser.add_argument("--id-suffix", type=int, help="explicit collision suffix for the HH_mm_ss ID (advanced; 1-99)")
     new_parser.set_defaults(func=command_new)
 
     transition_parser = sub.add_parser("transition", help="perform a guarded work-item state transition")

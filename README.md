@@ -18,13 +18,13 @@ ghdl/
 ├── PRODUCT.md
 ├── BOARD.md
 ├── items/
-│   └── GHDL-YYYYMMDD-XXXXXXXX/
+│   └── GHDL-YYYYMMDD-HH_mm_ss/
 │       ├── task.md
 │       ├── graph.md
 │       └── run-state.md
 └── archive/
     ├── INDEX.md
-    └── GHDL-YYYYMMDD-XXXXXXXX/
+    └── GHDL-YYYYMMDD-HH_mm_ss/
         ├── task.md
         ├── graph.md
         └── run-state.md
@@ -53,8 +53,10 @@ python .ghdl/scripts/ghdl.py next
 The helper updates `ghdl/archive/INDEX.md` automatically. Its simple format is one line per archived task:
 
 ```text
-GHDL-YYYYMMDD-XXXXXXXX Task title
+GHDL-YYYYMMDD-HH_mm_ss Task title
 ```
+
+Item IDs are `GHDL-<creation date>-<HH_mm_ss>`, so they sort chronologically. If two items are created in the same second, the helper appends `-1`, then `-2`, ... until the ID is unique.
 
 The archive index is the only archive file permitted for routine LLM context discovery. Archived task directories must not be scanned unless historical details are necessary.
 

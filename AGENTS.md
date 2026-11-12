@@ -39,13 +39,13 @@ ghdl/
   PRODUCT.md                      # durable product goal and project constraints
   BOARD.md                        # generated Kanban projection; do not edit manually
   items/                          # active work items only; source of truth
-    GHDL-YYYYMMDD-XXXXXXXX/
+    GHDL-YYYYMMDD-HH_mm_ss/       # creation timestamp; -x suffix on same-second collisions
       task.md                     # canonical metadata, scope, criteria, decisions
       graph.md                    # execution DAG (created on activation)
       run-state.md                # execution evidence (created on activation)
   archive/
     INDEX.md                      # ID + title only; maintained by the helper
-    GHDL-YYYYMMDD-XXXXXXXX/       # complete archived item directory
+    GHDL-YYYYMMDD-HH_mm_ss/       # complete archived item directory
       task.md
       graph.md                    # when it existed
       run-state.md                # when it existed
@@ -61,7 +61,7 @@ ghdl/
 - Each `ghdl/items/<ID>/task.md` is the canonical record for one active backlog item: metadata, outcome, scope, acceptance criteria, dependencies, assumptions, and decisions.
 - `graph.md` and `run-state.md` live inside the same item directory as `task.md`. They are persistent execution evidence, not disposable temporary files.
 - `ghdl/BOARD.md` is generated from active item metadata by the helper script. Do not edit it manually or treat it as a second source of truth.
-- `ghdl/archive/INDEX.md` is a script-maintained inventory. Each non-empty line has exactly this form: `GHDL-YYYYMMDD-XXXXXXXX Task title`. Do not add brackets, statuses, summaries, or other fields.
+- `ghdl/archive/INDEX.md` is a script-maintained inventory. Each non-empty line has exactly this form: `GHDL-YYYYMMDD-HH_mm_ss Task title`. Do not add brackets, statuses, summaries, or other fields.
 - The task directory is the unit of movement. Archiving moves the entire `ghdl/items/<ID>/` directory to `ghdl/archive/<ID>/` without editing its contents.
 
 ## 3. Archive context boundary — mandatory
@@ -249,7 +249,7 @@ Copy this `AGENTS.md` and the complete `.ghdl/` directory into the target projec
 python .ghdl/scripts/ghdl.py init
 ```
 
-`init` creates missing `ghdl/` directories, creates `archive/INDEX.md` if missing, copies `PRODUCT.md` from the template only when absent, regenerates `BOARD.md`, and automatically migrates the legacy `items/<ID>.md` + `runs/<ID>/` structure when found. For an explicit migration, run `python .ghdl/scripts/ghdl.py migrate`. The migration refuses to overwrite conflicting destinations and preserves all task/run files.
+`init` creates missing `ghdl/` directories, creates `archive/INDEX.md` if missing, copies `PRODUCT.md` from the template only when absent, and regenerates `BOARD.md`.
 
 ### Create a backlog item
 
@@ -257,7 +257,7 @@ python .ghdl/scripts/ghdl.py init
 python .ghdl/scripts/ghdl.py new --title "Add user sign-in" --type feature --priority P1
 ```
 
-Optional arguments: `--parent <ITEM-ID>` and `--depends-on <ID,ID,...>`. The command allocates `GHDL-YYYYMMDD-XXXXXXXX`, creates `ghdl/items/<ITEM-ID>/task.md`, writes metadata, and refreshes `BOARD.md`. Complete the item body and define measurable acceptance criteria before moving it to `READY`.
+Optional arguments: `--parent <ITEM-ID>`, `--depends-on <ID,ID,...>`, and `--id-suffix N` (advanced). The command allocates `GHDL-YYYYMMDD-HH_mm_ss` from the creation time, so IDs sort chronologically; if two items are created in the same second it appends `-1`, then `-2`, ... until unique. Complete the item body and define measurable acceptance criteria before moving it to `READY`.
 
 Allowed types: `feature`, `bug`, `refactor`, `chore`, `spike`. Priorities: `P0` (urgent), `P1` (high), `P2` (normal), `P3` (low).
 
